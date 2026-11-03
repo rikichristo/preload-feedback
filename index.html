@@ -54,6 +54,9 @@ select:focus,textarea:focus,input:focus{border-color:var(--ink);outline:none}
 .rate{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:6px}
 .rate button{aspect-ratio:1;max-width:100%;border:1px solid var(--line2);background:var(--bg);border-radius:999px;font-family:var(--mono);font-weight:600;font-size:.9rem;color:var(--soft);padding:0}
 .rate button[aria-pressed="true"]{background:var(--ink);color:#000;border-color:var(--ink)}
+.devs{display:flex;gap:8px;flex-wrap:wrap}
+.devs button{flex:1 1 0;min-width:84px;border:1px solid var(--line2);background:var(--bg);border-radius:999px;padding:12px 14px;font-weight:600;font-size:.95rem;color:var(--soft)}
+.devs button[aria-pressed="true"]{background:var(--ink);color:#000;border-color:var(--ink)}
 .rate-ends{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
 @media (max-width:400px){.rate{grid-template-columns:repeat(5,minmax(0,1fr))}.rate button{aspect-ratio:auto;padding:11px 0}}
 
@@ -108,13 +111,15 @@ const SERIES = [
 ];
 const DRIVERS = SERIES.flatMap(s => s[1]);
 const QS = [
-  ["useful","What's on Preload that you find useful?"],
-  ["missing","What isn't on Preload that you would find useful?"],
-  ["not_useful","What's on Preload that you don't find useful?"],
-  ["bugs","Have you noticed any bugs, glitches or annoyances while using Preload?"],
-  ["change","What would you change or add? List as many as you like."],
-  ["usage","How much do you use Preload? Before, during or after events?"]
+  ["useful","What do you use most on Preload, and why?","Tell us the bits you go back to and what they help you with."],
+  ["missing","What do you wish Preload had?","Anything you look for and can't find, or still do somewhere else (notes app, WhatsApp, paper)."],
+  ["not_useful","Is there anything you skip or never use?","Be honest, it helps us cut the clutter."],
+  ["bugs","Has anything been broken, slow or annoying?","Say what you were doing when it happened."],
+  ["change","If you were in charge of Preload, what would you change first?","Then add as many other ideas as you like."],
+  ["usage","When do you use Preload?","For example: the night before a session, at the track, after a race, or not much."]
 ];
+const DEVICES = ["Phone","iPad","Laptop"];
+const DEVICE_Q = "What do you use Preload on?";
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const ls = { get(k){ try{ return localStorage.getItem(k) }catch(_){ return null } }, set(k,v){ try{ localStorage.setItem(k,v) }catch(_){} }, del(k){ try{ localStorage.removeItem(k) }catch(_){} } };
@@ -150,17 +155,23 @@ function formView(){
           ${SERIES.map(([s,ds])=>`<optgroup label="${esc(s)}">${ds.map(d=>`<option${draft.driver===d?" selected":""}>${esc(d)}</option>`).join("")}</optgroup>`).join("")}
         </select>
       </div>
-      ${QS.map(([k,q],i)=>`
+      ${QS.map(([k,q,h],i)=>`
       <div class="q">
-        <label for="a-${k}"><span class="n">0${i+1}</span><h2>${esc(q)}</h2></label>
+        <label for="a-${k}"><span class="n">0${i+1}</span><h2>${esc(q)}</h2><span class="hint">${esc(h)}</span></label>
         <textarea id="a-${k}" data-k="${k}" maxlength="3000" rows="3">${esc(draft[k]||"")}</textarea>
       </div>`).join("")}
+      <div class="q" id="q-dev">
+        <div class="lbl"><span class="n">07</span><h2>${esc(DEVICE_Q)}</h2><span class="hint">Tap all that you use.</span></div>
+        <div class="devs" role="group" aria-label="${esc(DEVICE_Q)}">
+          ${DEVICES.map(d=>`<button type="button" data-dev="${d}" aria-pressed="${(draft.device||[]).includes(d)}">${d}</button>`).join("")}
+        </div>
+      </div>
       <div class="q" id="q-rate">
-        <div class="lbl"><span class="n">07</span><h2>Overall, rate Preload out of 10</h2></div>
+        <div class="lbl"><span class="n">08</span><h2>How would you score Preload out of 10?</h2><span class="hint">1 = I don't really use it, 10 = I couldn't do a weekend without it.</span></div>
         <div class="rate" role="group" aria-label="Rating out of 10">
           ${Array.from({length:10},(_,i)=>`<button type="button" data-r="${i+1}" aria-pressed="${draft.rating===i+1}">${i+1}</button>`).join("")}
         </div>
-        <div class="rate-ends"><span>Useless</span><span>Perfect</span></div>
+        <div class="rate-ends"><span>Don't use it</span><span>Can't live without it</span></div>
       </div>
       <p class="hint err" id="err" hidden></p>
       <button class="btn primary big" type="submit" id="send">Send feedback</button>
@@ -184,6 +195,8 @@ document.addEventListener("input", e => {
 });
 document.addEventListener("click", e => {
   const r = e.target.closest("[data-r]");
+  const dv = e.target.closest("[data-dev]");
+  if (dv) { const v = dv.dataset.dev, cur = new Set(draft.device||[]); cur.has(v) ? cur.delete(v) : cur.add(v); draft.device = DEVICES.filter(d=>cur.has(d)); saveDraft(); dv.setAttribute("aria-pressed", String(cur.has(v))); }
   if (r) { draft.rating = +r.dataset.r; saveDraft(); document.querySelectorAll("[data-r]").forEach(b=>b.setAttribute("aria-pressed", String(+b.dataset.r===draft.rating))); $("#q-rate").classList.remove("need"); }
   if (e.target.id === "again") { ls.del("pf:sent"); for (const k of Object.keys(draft)) delete draft[k]; saveDraft(); formView(); scrollTo(0,0); }
   if (e.target.id === "logout") { sb.auth.signOut().then(route); }
@@ -192,13 +205,14 @@ document.addEventListener("click", e => {
 async function submitForm(){
   const err = $("#err"); err.hidden = true;
   const name = draft.driver || "";
-  const answered = QS.some(([k]) => (draft[k]||"").trim()) || draft.rating;
+  const answered = QS.some(([k]) => (draft[k]||"").trim()) || draft.rating || (draft.device||[]).length;
   if (!name) { $("#q-name").classList.add("need"); err.textContent = "Pick your name at the top first."; err.hidden = false; $("#q-name").scrollIntoView({behavior:"smooth",block:"center"}); return; }
   if (!answered) { err.textContent = "Answer at least one question before sending."; err.hidden = false; return; }
   if (!sb) { err.textContent = "The form couldn't connect. Check your signal and try again."; err.hidden = false; return; }
   const btn = $("#send"); btn.disabled = true; btn.textContent = "Sending…";
   const row = { survey: SURVEY, driver_name: name, rating: draft.rating || null };
   QS.forEach(([k]) => row[k] = (draft[k]||"").trim());
+  row.device = (draft.device||[]).join(", ") || null;
   const { error } = await sb.from("rh_feedback").insert(row);
   if (error) {
     btn.disabled = false; btn.textContent = "Send feedback";
@@ -262,15 +276,15 @@ function renderResults(){
   </div>
   ${rows.length ? rows.map(r=>`<article class="resp">
     <div class="resp-h"><b>${esc(r.driver_name)}</b>${r.rating?`<span class="score ${cls(r.rating)}">${r.rating}/10</span>`:""}<time>${fmt(r.created_at)}</time></div>
-    <dl>${QS.map(([k,q])=>`<div><dt>${esc(q)}</dt><dd class="${r[k]?"":"none"}">${r[k]?esc(r[k]):"No answer"}</dd></div>`).join("")}</dl>
+    <dl>${QS.map(([k,q])=>`<div><dt>${esc(q)}</dt><dd class="${r[k]?"":"none"}">${r[k]?esc(r[k]):"No answer"}</dd></div>`).join("")}<div><dt>${esc(DEVICE_Q)}</dt><dd class="${r.device?"":"none"}">${r.device?esc(r.device):"No answer"}</dd></div></dl>
   </article>`).join("") : `<div class="empty">No responses yet. They appear here as soon as a driver sends one.</div>`}`;
 }
 document.addEventListener("change", e => { if (e.target.id === "flt") { FILTER = e.target.value; renderResults(); } });
 document.addEventListener("click", e => {
   if (e.target.id !== "csv") return;
   const cell = s => String(s ?? "").replace(/\t|\r?\n/g," ");
-  const head = ["Date","Driver","Rating",...QS.map(q=>q[1])].join("\t");
-  const body = ROWS.map(r=>[new Date(r.created_at).toLocaleString("en-GB"),r.driver_name,r.rating??"",...QS.map(([k])=>r[k])].map(cell).join("\t")).join("\n");
+  const head = ["Date","Driver","Rating",...QS.map(q=>q[1]),DEVICE_Q].join("\t");
+  const body = ROWS.map(r=>[new Date(r.created_at).toLocaleString("en-GB"),r.driver_name,r.rating??"",...QS.map(([k])=>r[k]),r.device].map(cell).join("\t")).join("\n");
   const t = head + "\n" + body;
   (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(()=>toast("Copied. Paste into Excel or Sheets."), ()=>toast("Couldn't copy on this device."));
 });
