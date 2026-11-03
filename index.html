@@ -84,6 +84,9 @@ select:focus,textarea:focus,input:focus{border-color:var(--ink);outline:none}
 .resp-h time{font-family:var(--mono);font-size:.68rem;color:var(--muted);margin-left:auto}
 .score{font-family:var(--mono);font-weight:600;font-size:.8rem;border:1px solid var(--line2);border-radius:999px;padding:3px 10px}
 .score.lo{color:var(--bad);border-color:var(--bad)}.score.mid{color:var(--warn);border-color:var(--warn)}
+.btn.sm{padding:5px 12px;font-size:.78rem}
+.resp-h .btn.sm{margin-left:auto}.resp-h time+.btn.sm{margin-left:0}
+@media (max-width:480px){.resp-h time{order:5;flex-basis:100%;margin-left:0}.resp-h time+.btn.sm{margin-left:auto}}
 .resp dl{margin:0;display:grid;gap:10px}
 .resp dt{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
 .resp dd{margin:2px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
@@ -272,10 +275,11 @@ function renderResults(){
   <div class="tools">
     <select id="flt" aria-label="Filter by driver"><option value="">All drivers</option>${[...who].sort().map(d=>`<option${FILTER===d?" selected":""}>${esc(d)}</option>`).join("")}</select>
     <button class="btn" id="csv" type="button">Copy as table</button>
+    <button class="btn" id="pdfAll" type="button"${rows.length?"":" disabled"}>${FILTER?"Download PDF":"Download all as PDF"}</button>
     <button class="btn" id="logout" type="button">Sign out</button>
   </div>
   ${rows.length ? rows.map(r=>`<article class="resp">
-    <div class="resp-h"><b>${esc(r.driver_name)}</b>${r.rating?`<span class="score ${cls(r.rating)}">${r.rating}/10</span>`:""}<time>${fmt(r.created_at)}</time></div>
+    <div class="resp-h"><b>${esc(r.driver_name)}</b>${r.rating?`<span class="score ${cls(r.rating)}">${r.rating}/10</span>`:""}<time>${fmt(r.created_at)}</time><button class="btn sm" type="button" data-pdf="${esc(r.id)}" aria-label="Download ${esc(r.driver_name)} as PDF">PDF</button></div>
     <dl>${QS.map(([k,q])=>`<div><dt>${esc(q)}</dt><dd class="${r[k]?"":"none"}">${r[k]?esc(r[k]):"No answer"}</dd></div>`).join("")}<div><dt>${esc(DEVICE_Q)}</dt><dd class="${r.device?"":"none"}">${r.device?esc(r.device):"No answer"}</dd></div></dl>
   </article>`).join("") : `<div class="empty">No responses yet. They appear here as soon as a driver sends one.</div>`}`;
 }
@@ -287,6 +291,75 @@ document.addEventListener("click", e => {
   const body = ROWS.map(r=>[new Date(r.created_at).toLocaleString("en-GB"),r.driver_name,r.rating??"",...QS.map(([k])=>r[k]),r.device].map(cell).join("\t")).join("\n");
   const t = head + "\n" + body;
   (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(()=>toast("Copied. Paste into Excel or Sheets."), ()=>toast("Couldn't copy on this device."));
+});
+
+/* ---------------- PDF export (captures the cards as shown) ---------------- */
+function loadScript(src){ return new Promise((ok,no)=>{ const t=document.createElement("script"); t.src=src; t.onload=ok; t.onerror=()=>no(new Error("load")); document.head.appendChild(t); }); }
+let pdfLibs = null;
+function pdfReady(){
+  return pdfLibs ||= Promise.all([
+    window.html2canvas || loadScript("https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"),
+    window.jspdf || loadScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js")
+  ]).catch(e => { pdfLibs = null; throw e; });
+}
+async function exportPdf(ids, filename, withSummary){
+  await pdfReady(); if (document.fonts && document.fonts.ready) await document.fonts.ready;
+  const W = 620, PAD = 24;
+  const sheet = document.createElement("div");
+  sheet.style.cssText = `position:fixed;left:-10000px;top:0;width:${W}px;padding:${PAD}px;background:#000;color:var(--ink);display:grid;gap:16px;box-sizing:border-box`;
+  const logo = $("#brandSlot img");
+  const head = document.createElement("div");
+  head.style.cssText = "display:grid;justify-items:center;gap:14px;padding-bottom:16px;border-bottom:1px solid var(--line)";
+  if (logo) { const im = logo.cloneNode(); im.style.cssText = "height:24px;width:auto;display:block"; head.appendChild(im); }
+  head.setAttribute("data-brk",""); sheet.appendChild(head);
+  if (withSummary) ["#main .intro","#main .sum","#main > p.hint"].forEach(sel => { const n=$(sel); if (n) { const c=n.cloneNode(true); c.setAttribute("data-brk",""); sheet.appendChild(c); } });
+  else { const intro=$("#main .intro").cloneNode(true); intro.setAttribute("data-brk",""); sheet.appendChild(intro); }
+  ids.forEach((id,i) => {
+    const card = document.querySelector(`[data-pdf="${CSS.escape(id)}"]`).closest(".resp").cloneNode(true);
+    card.querySelectorAll("button").forEach(b=>b.remove());
+    if (withSummary || i) card.setAttribute("data-pb","");
+    card.querySelectorAll(".resp-h, dl > div").forEach(n=>n.setAttribute("data-brk",""));
+    card.setAttribute("data-brk",""); sheet.appendChild(card);
+  });
+  document.body.appendChild(sheet);
+  try {
+    const top = sheet.getBoundingClientRect().top;
+    const brks = [...sheet.querySelectorAll("[data-brk]")].map(n=>n.getBoundingClientRect().bottom - top + 8);
+    const forced = [...sheet.querySelectorAll("[data-pb]")].map(n=>n.getBoundingClientRect().top - top - 8);
+    const dds = [...sheet.querySelectorAll("dd")].map(n=>{ const r=n.getBoundingClientRect(); return { t:r.top-top, b:r.bottom-top, lh:parseFloat(getComputedStyle(n).lineHeight)||23 }; });
+    const H = sheet.offsetHeight, SC = 2;
+    const canvas = await html2canvas(sheet, { backgroundColor:"#000", scale:SC, useCORS:true, logging:false, windowWidth:W });
+    const { jsPDF } = window.jspdf; const pdf = new jsPDF({ unit:"mm", format:"a4" });
+    const pw = 210, ph = 297, m = 8, mmPerPx = (pw - 2*m) / W, pagePx = Math.floor((ph - 2*m) / mmPerPx);
+    let y = 0, first = true;
+    while (y < H - 2) {
+      let end = Math.min(y + pagePx, H);
+      const f = forced.find(v => v > y + 40 && v < end); if (f) end = f;
+      else if (end < H) {
+        const b = brks.filter(v => v > y + 120 && v <= end).pop();
+        if (b) end = b;
+        else { const d = dds.find(d => end > d.t && end < d.b); if (d) { const e2 = d.t + Math.floor((end - d.t) / d.lh) * d.lh; if (e2 > y + 120) end = e2; } }
+      }
+      const slice = document.createElement("canvas"); slice.width = canvas.width; slice.height = Math.ceil((end - y) * SC);
+      const cx = slice.getContext("2d"); cx.fillStyle = "#000"; cx.fillRect(0,0,slice.width,slice.height);
+      cx.drawImage(canvas, 0, Math.floor(y*SC), canvas.width, slice.height, 0, 0, canvas.width, slice.height);
+      if (!first) pdf.addPage(); first = false;
+      pdf.setFillColor(0,0,0); pdf.rect(0,0,pw,ph,"F");
+      pdf.addImage(slice.toDataURL("image/jpeg",0.92), "JPEG", m, m, pw - 2*m, (end - y) * mmPerPx);
+      y = end;
+    }
+    pdf.save(filename);
+  } finally { sheet.remove(); }
+}
+document.addEventListener("click", async e => {
+  const one = e.target.closest("[data-pdf]"), all = e.target.id === "pdfAll";
+  if (!one && !all) return;
+  const btn = one || e.target, label = btn.textContent; btn.disabled = true; btn.textContent = "Making PDF…";
+  try {
+    if (one) { const r = ROWS.find(x => String(x.id) === one.dataset.pdf); await exportPdf([one.dataset.pdf], `Preload feedback - ${r ? r.driver_name : "driver"}.pdf`, false); }
+    else { const ids = [...document.querySelectorAll("#main [data-pdf]")].map(b=>b.dataset.pdf); await exportPdf(ids, FILTER ? `Preload feedback - ${FILTER}.pdf` : "Preload feedback - All drivers.pdf", true); }
+  } catch (_) { toast("Couldn't make the PDF. Check your connection and try again."); }
+  btn.disabled = false; btn.textContent = label;
 });
 
 document.addEventListener("submit", async e => {
